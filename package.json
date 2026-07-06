@@ -1,6 +1,6 @@
 {
   "name": "copilot2api",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "OpenAI-compatible local API server for GitHub Copilot, powered by the official Copilot SDK",
   "scripts": {
     "test": "node --test",
@@ -19,7 +19,7 @@
   "dependencies": {
     "@github/copilot-sdk": "^1.0.5",
     "@hono/node-server": "^2.0.8",
-    "hono": "^4.12.28"
+    "hono": "^4.12.27"
   },
   "bin": {
     "copilot2api": "bin/copilot2api.js"
