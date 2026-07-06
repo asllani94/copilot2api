@@ -16,6 +16,13 @@ Your app (OpenAI SDK) → http://127.0.0.1:4141/v1 → copilot2api → GitHub Co
 npm install -g copilot2api
 ```
 
+or via Homebrew:
+
+```sh
+brew tap asllani94/tap
+brew install copilot2api
+```
+
 ## Quick start
 
 ```sh
