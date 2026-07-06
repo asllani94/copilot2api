@@ -16,6 +16,7 @@ import {
   toErrorBody,
   toModelList,
 } from "./openai.js";
+import { parseResponsesRequest, toResponse } from "./responses.js";
 
 /**
  * @param {import("@github/copilot-sdk").CopilotClient} client
@@ -56,6 +57,13 @@ export function createApp(client, config) {
       return c.json(toChatCompletion(completionMeta(request.model), content));
     }
     return streamCompletion(c, session, request);
+  });
+
+  app.post("/v1/responses", async (c) => {
+    const request = parseResponsesRequest(await parseJson(c));
+    const session = await createChatSession(client, { model: request.model, stream: false });
+    const reply = await runToCompletion(session, request.prompt);
+    return c.json(toResponse(request, reply));
   });
 
   app.notFound((c) => c.json(toErrorBody(`Unknown route: ${c.req.method} ${c.req.path}`), 404));

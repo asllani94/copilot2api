@@ -56,8 +56,14 @@ curl http://127.0.0.1:4141/v1/chat/completions \
 | Endpoint                    | Description                                        |
 | --------------------------- | -------------------------------------------------- |
 | `POST /v1/chat/completions` | Chat completions — streaming (SSE) & non-streaming |
+| `POST /v1/responses`        | Responses API — structured JSON output (`text.format`) and function tools, both prompt-shimmed (non-streaming) |
 | `GET /v1/models`            | Models your Copilot plan/policy exposes            |
 | `GET /health`               | Liveness probe (never requires auth)               |
+
+The Responses API support is enough to drive AI-SDK-based frameworks — see
+[`examples/stagehand`](examples/stagehand) for AI browser automation
+([Stagehand](https://github.com/browserbase/stagehand) + Playwright) running
+entirely on your Copilot subscription.
 
 ## Configuration
 

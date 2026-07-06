@@ -1,0 +1,17 @@
+{
+  "name": "stagehand",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@browserbasehq/stagehand": "^3.6.0",
+    "@playwright/test": "^1.61.1"
+  }
+}
