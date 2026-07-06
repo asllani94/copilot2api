@@ -102,6 +102,17 @@ When an API key is set, `/v1` routes require `Authorization: Bearer <key>`.
   tool is subject to [GitHub's terms](https://docs.github.com/en/site-policy/github-terms/github-terms-for-additional-products-and-features#github-copilot)
   and your organization's policies — check before deploying beyond personal use.
 
+## Troubleshooting
+
+**"Session was not created with authentication info" right after installing** —
+the Copilot token lives in the macOS keychain, and the first access from a new
+binary (e.g. a fresh Homebrew install) can be denied non-interactively. Run one
+interactive command to grant access, then restart the server:
+
+```sh
+copilot2api login   # or re-run it; answering the keychain prompt once is enough
+```
+
 ## Development
 
 ```sh
