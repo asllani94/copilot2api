@@ -1,6 +1,6 @@
 {
   "name": "copilot2api",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "OpenAI-compatible local API server for GitHub Copilot, powered by the official Copilot SDK",
   "scripts": {
     "test": "node --test",
