@@ -24,7 +24,7 @@ import {
 export function createApp(client, config) {
   const app = new Hono();
 
-  app.use(logger());
+  if (config.logRequests !== false) app.use(logger());
   app.use(cors({ origin: "*", allowHeaders: ["Content-Type", "Authorization"] }));
   app.use(
     bodyLimit({
