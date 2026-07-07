@@ -8,7 +8,13 @@ subscription. Built on the official
 which bundles the Copilot CLI — no separate install needed.
 
 ```
-Your app (OpenAI/Anthropic SDK) → http://127.0.0.1:4141/v1 → copilot2api → GitHub Copilot
+Your app (OpenAI/Anthropic HTTP client)
+        ↓  HTTP · http://127.0.0.1:4141/v1
+copilot2api (@github/copilot-sdk wrapper)
+        ↓  JSON-RPC
+Copilot CLI (server mode, bundled)
+        ↓
+GitHub Copilot
 ```
 
 ## Install
