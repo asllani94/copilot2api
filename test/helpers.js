@@ -93,3 +93,15 @@ export function parseSse(text) {
     .filter((block) => block.startsWith("data: "))
     .map((block) => block.slice("data: ".length));
 }
+
+/** Parse a named-event SSE body (Anthropic style) into {event, data} pairs. */
+export function parseSseEvents(text) {
+  return text
+    .split("\n\n")
+    .filter((block) => block.includes("data: "))
+    .map((block) => {
+      const event = block.match(/^event: (.*)$/m)?.[1];
+      const data = JSON.parse(block.match(/^data: (.*)$/m)[1]);
+      return { event, data };
+    });
+}

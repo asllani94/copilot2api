@@ -32,9 +32,9 @@ export function parseResponsesRequest(body) {
       ? text.format
       : null;
 
-  const sections = [];
-  const system = [instructions, ...collectSystemTexts(input)].filter(Boolean).join("\n");
-  if (system) sections.push(`<instructions>\n${system}\n</instructions>`);
+  // Directives live in the session's system message; the prompt carries
+  // only the rendered input.
+  const sections = [instructions, ...collectSystemTexts(input)].filter(Boolean);
 
   if (functionTools.length > 0) {
     const toolList = functionTools
@@ -52,11 +52,10 @@ export function parseResponsesRequest(body) {
     );
   }
 
-  sections.push(renderInput(input));
-
   return {
     model,
-    prompt: sections.join("\n\n"),
+    system: sections.join("\n\n"),
+    prompt: renderInput(input),
     hasTools: functionTools.length > 0,
     toolNames: new Set(functionTools.map((t) => t.name)),
     jsonOnly: Boolean(jsonFormat),

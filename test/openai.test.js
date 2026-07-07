@@ -3,11 +3,12 @@ import { describe, it } from "node:test";
 import {
   completionMeta,
   contentToText,
-  renderPrompt,
+  renderChat,
   toChatCompletion,
   toChunk,
   toErrorBody,
   toModelList,
+  toolCallDelta,
 } from "../src/openai.js";
 
 describe("contentToText", () => {
@@ -32,21 +33,22 @@ describe("contentToText", () => {
   });
 });
 
-describe("renderPrompt", () => {
-  it("sends a single user message as-is", () => {
-    assert.equal(renderPrompt([{ role: "user", content: "hi" }]), "hi");
+describe("renderChat", () => {
+  it("sends a single user message as-is, with empty system", () => {
+    assert.deepEqual(renderChat([{ role: "user", content: "hi" }]), { system: "", prompt: "hi" });
   });
 
-  it("wraps system messages in an instructions block", () => {
-    const prompt = renderPrompt([
+  it("hoists system messages into the system field", () => {
+    const { system, prompt } = renderChat([
       { role: "system", content: "Be terse." },
       { role: "user", content: "hi" },
     ]);
-    assert.match(prompt, /^<instructions>\nBe terse\.\n<\/instructions>\n\nhi$/);
+    assert.equal(system, "Be terse.");
+    assert.equal(prompt, "hi");
   });
 
   it("renders multi-turn history as a labelled transcript", () => {
-    const prompt = renderPrompt([
+    const { prompt } = renderChat([
       { role: "user", content: "My name is Erdi." },
       { role: "assistant", content: "Hi Erdi." },
       { role: "user", content: "What is my name?" },
@@ -58,11 +60,37 @@ describe("renderPrompt", () => {
   });
 
   it("treats developer role like system", () => {
-    const prompt = renderPrompt([
+    const { system } = renderChat([
       { role: "developer", content: "Rule." },
       { role: "user", content: "hi" },
     ]);
-    assert.match(prompt, /<instructions>\nRule\.\n<\/instructions>/);
+    assert.equal(system, "Rule.");
+  });
+
+  it("appends the tool protocol to the system field", () => {
+    const { system, prompt } = renderChat(
+      [{ role: "user", content: "click go" }],
+      [{ name: "click", description: "Click", parameters: { type: "object" } }],
+    );
+    assert.match(system, /# Tool calling protocol/);
+    assert.match(system, /- click: Click/);
+    assert.equal(prompt, "click go");
+  });
+
+  it("re-renders assistant tool_calls and tool results in the transcript", () => {
+    const { prompt } = renderChat([
+      { role: "user", content: "click go" },
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          { id: "call_1", type: "function", function: { name: "click", arguments: '{"s":"#go"}' } },
+        ],
+      },
+      { role: "tool", tool_call_id: "call_1", content: "clicked" },
+    ]);
+    assert.match(prompt, /Assistant:\n\[tool_call\]\{"name":"click","arguments":\{"s":"#go"\}\}\[\/tool_call\]/);
+    assert.match(prompt, /Tool result \(call_1\): clicked/);
   });
 });
 
@@ -83,11 +111,23 @@ describe("response shapes", () => {
   });
 
   it("toChatCompletion wraps content in a single choice", () => {
-    const body = toChatCompletion({ id: "chatcmpl-x", created: 1, model: "auto" }, "hi");
+    const body = toChatCompletion({ id: "chatcmpl-x", created: 1, model: "auto" }, { text: "hi" });
     assert.equal(body.object, "chat.completion");
     assert.equal(body.choices[0].message.content, "hi");
     assert.equal(body.choices[0].finish_reason, "stop");
     assert.deepEqual(body.usage, { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 });
+  });
+
+  it("toChatCompletion carries tool calls with a tool_calls finish reason", () => {
+    const body = toChatCompletion(
+      { id: "chatcmpl-x", created: 1, model: "auto" },
+      { text: "", toolCalls: [{ id: "call_0", name: "click", arguments: '{"s":"#go"}' }] },
+    );
+    assert.equal(body.choices[0].finish_reason, "tool_calls");
+    assert.equal(body.choices[0].message.content, null);
+    assert.deepEqual(body.choices[0].message.tool_calls, [
+      { id: "call_0", type: "function", function: { name: "click", arguments: '{"s":"#go"}' } },
+    ]);
   });
 
   it("toChunk carries a delta and finish reason", () => {
@@ -95,6 +135,12 @@ describe("response shapes", () => {
     assert.equal(chunk.object, "chat.completion.chunk");
     assert.deepEqual(chunk.choices[0].delta, { content: "h" });
     assert.equal(chunk.choices[0].finish_reason, null);
+  });
+
+  it("toolCallDelta matches the streaming tool_calls shape", () => {
+    assert.deepEqual(toolCallDelta(0, "call_0", "click", "{}"), {
+      tool_calls: [{ index: 0, id: "call_0", type: "function", function: { name: "click", arguments: "{}" } }],
+    });
   });
 
   it("toErrorBody matches the OpenAI error envelope", () => {

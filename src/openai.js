@@ -3,6 +3,7 @@
  * Copilot SDK's prompt/session model.
  */
 import crypto from "node:crypto";
+import { toolCallBlock, toolInstructions } from "./toolcalls.js";
 
 const MODEL_OWNER = "github-copilot";
 
@@ -19,34 +20,56 @@ export function contentToText(content) {
 }
 
 /**
- * Render an OpenAI message array into a single Copilot prompt.
+ * Render an OpenAI message array (plus optional function tools) into a
+ * system message and a prompt for a Copilot session.
  *
  * SDK sessions are stateful, but OpenAI clients resend the full history on
- * every call — so each request gets a fresh session and the history is
- * rendered as one transcript prompt.
+ * every call — so each request gets a fresh session, the system/developer
+ * messages (and tool protocol) become the session's system message, and the
+ * conversation is rendered as one transcript prompt.
+ *
+ * @param {Array<object>} messages
+ * @param {Array<{name: string, description?: string, parameters?: object}>} tools
+ * @returns {{system: string, prompt: string}}
  */
-export function renderPrompt(messages) {
-  const system = messages
+export function renderChat(messages, tools = []) {
+  const systemParts = messages
     .filter((m) => m.role === "system" || m.role === "developer")
     .map((m) => contentToText(m.content))
-    .join("\n");
-  const turns = messages.filter((m) => m.role === "user" || m.role === "assistant");
+    .filter(Boolean);
+  if (tools.length > 0) systemParts.push(toolInstructions(tools));
 
-  const parts = [];
-  if (system) parts.push(`<instructions>\n${system}\n</instructions>`);
-
-  if (turns.length === 1) {
-    parts.push(contentToText(turns[0].content));
-  } else {
-    const transcript = turns
-      .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${contentToText(m.content)}`)
-      .join("\n\n");
-    parts.push(
-      "The following is a conversation transcript. Reply with the next assistant message only, without any role prefix.",
-      transcript,
-    );
+  const lines = [];
+  for (const m of messages) {
+    if (m.role === "user") {
+      lines.push(`User: ${contentToText(m.content)}`);
+    } else if (m.role === "assistant") {
+      let line = "Assistant:";
+      const text = contentToText(m.content);
+      if (text) line += ` ${text}`;
+      const calls = (Array.isArray(m.tool_calls) ? m.tool_calls : [])
+        .filter((tc) => tc?.function?.name)
+        .map((tc) => toolCallBlock(tc.function.name, tc.function.arguments));
+      if (calls.length > 0) line += `\n${calls.join("\n")}`;
+      lines.push(line);
+    } else if (m.role === "tool") {
+      const result = contentToText(m.content);
+      lines.push(
+        m.tool_call_id ? `Tool result (${m.tool_call_id}): ${result}` : `Tool result: ${result}`,
+      );
+    }
   }
-  return parts.join("\n\n");
+
+  return { system: systemParts.join("\n\n"), prompt: renderTranscript(lines) };
+}
+
+/** Render transcript lines, collapsing a lone user turn to its raw text. */
+export function renderTranscript(lines) {
+  if (lines.length === 0) return "";
+  if (lines.length === 1 && lines[0].startsWith("User: ")) {
+    return lines[0].slice("User: ".length);
+  }
+  return `The following is a conversation transcript. Reply with the next assistant message only, without any role prefix.\n\n${lines.join("\n\n")}`;
 }
 
 /** Fresh identifiers for a completion response. */
@@ -71,20 +94,38 @@ export function toModelList(models) {
   };
 }
 
-/** Non-streaming `chat.completion` response body. */
-export function toChatCompletion(meta, content) {
+/**
+ * Non-streaming `chat.completion` response body.
+ * @param {{text: string, toolCalls?: Array<{id: string, name: string, arguments: string}>}} reply
+ */
+export function toChatCompletion(meta, { text, toolCalls = [] }) {
+  const message = { role: "assistant", content: toolCalls.length > 0 && !text ? null : text };
+  if (toolCalls.length > 0) {
+    message.tool_calls = toolCalls.map((tc) => ({
+      id: tc.id,
+      type: "function",
+      function: { name: tc.name, arguments: tc.arguments },
+    }));
+  }
   return {
     ...meta,
     object: "chat.completion",
     choices: [
       {
         index: 0,
-        message: { role: "assistant", content },
-        finish_reason: "stop",
+        message,
+        finish_reason: toolCalls.length > 0 ? "tool_calls" : "stop",
       },
     ],
     // The SDK does not report token counts.
     usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+  };
+}
+
+/** Streaming delta carrying a single tool call, for use with `toChunk`. */
+export function toolCallDelta(index, id, name, args) {
+  return {
+    tool_calls: [{ index, id, type: "function", function: { name, arguments: args } }],
   };
 }
 

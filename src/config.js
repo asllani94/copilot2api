@@ -18,6 +18,11 @@ export const DEFAULTS = Object.freeze({
   apiKey: undefined,
   /** Maximum accepted request body size, in bytes. */
   maxBodyBytes: 10 * 1024 * 1024,
+  /**
+   * Display-ID → Copilot-ID model aliases, e.g. {"claude-sonnet-4": "auto"}.
+   * Aliased IDs are accepted in requests and listed by /v1/models.
+   */
+  modelMap: {},
 });
 
 export function defaultConfigPath() {
@@ -27,7 +32,7 @@ export function defaultConfigPath() {
 
 /**
  * @param {object} flags Parsed CLI flags (`port`, `host`, `apiKey`, `config`).
- * @returns {{host: string, port: number, apiKey: string|undefined, maxBodyBytes: number}}
+ * @returns {{host: string, port: number, apiKey: string|undefined, maxBodyBytes: number, modelMap: Record<string, string>}}
  */
 export function resolveConfig(flags = {}) {
   const file = readConfigFile(flags.config);
@@ -40,6 +45,7 @@ export function resolveConfig(flags = {}) {
     maxBodyBytes: parseSize(
       env.COPILOT2API_MAX_BODY_BYTES ?? file.maxBodyBytes ?? DEFAULTS.maxBodyBytes,
     ),
+    modelMap: parseModelMap(file.modelMap ?? DEFAULTS.modelMap),
   });
 }
 
@@ -66,6 +72,18 @@ function parsePort(value) {
     throw new Error(`Invalid port: ${value}`);
   }
   return port;
+}
+
+function parseModelMap(value) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("Invalid modelMap: expected an object of {displayId: copilotId} strings");
+  }
+  for (const [display, copilot] of Object.entries(value)) {
+    if (typeof copilot !== "string" || !copilot) {
+      throw new Error(`Invalid modelMap entry for '${display}': expected a model id string`);
+    }
+  }
+  return Object.freeze({ ...value });
 }
 
 function parseSize(value) {

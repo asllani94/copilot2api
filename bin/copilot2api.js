@@ -20,14 +20,14 @@ Usage:
 Options:
   -p, --port <port>     Port to listen on (default: ${DEFAULTS.port})
       --host <host>     Interface to bind (default: ${DEFAULTS.host})
-      --api-key <key>   Require "Authorization: Bearer <key>" on /v1 routes
+      --api-key <key>   Require the key ("Authorization: Bearer" or "x-api-key") on API routes
   -c, --config <path>   Config file (default: ${defaultConfigPath()})
   -h, --help            Show this help
   -v, --version         Show version
 
 Configuration precedence: CLI flags > environment > config file > defaults.
 Environment variables: COPILOT2API_PORT, COPILOT2API_HOST, COPILOT2API_API_KEY.
-Config file format: JSON with { "port", "host", "apiKey" }.
+Config file format: JSON with { "port", "host", "apiKey", "modelMap" }.
 
 Authentication:
   Uses your GitHub Copilot login (device flow). To sign in, run:

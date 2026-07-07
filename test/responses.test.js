@@ -56,11 +56,12 @@ describe("POST /v1/responses", () => {
         ],
       }),
     );
-    const prompt = client.sessions[0].lastPrompt;
-    assert.match(prompt, /<instructions>\nBe terse\.\n<\/instructions>/);
-    assert.match(prompt, /User: hi/);
-    assert.match(prompt, /Assistant: hello/);
-    assert.match(prompt, /User: bye/);
+    const session = client.sessions[0];
+    assert.match(session.config.systemMessage.content, /Be terse\./);
+    assert.equal(session.config.systemMessage.mode, "replace");
+    assert.match(session.lastPrompt, /User: hi/);
+    assert.match(session.lastPrompt, /Assistant: hello/);
+    assert.match(session.lastPrompt, /User: bye/);
   });
 
   it("reduces a JSON-mode reply to its JSON payload", async () => {
@@ -78,8 +79,8 @@ describe("POST /v1/responses", () => {
     );
     const body = await res.json();
     assert.equal(body.output[0].content[0].text, '{"heading":"Example"}');
-    // Schema directive must be in the prompt.
-    assert.match(client.sessions[0].lastPrompt, /<output-format>/);
+    // Schema directive must be in the system message.
+    assert.match(client.sessions[0].config.systemMessage.content, /<output-format>/);
   });
 
   it("translates a tool_call reply into a function_call item", async () => {
@@ -100,7 +101,7 @@ describe("POST /v1/responses", () => {
     assert.equal(call.type, "function_call");
     assert.equal(call.name, "click");
     assert.deepEqual(JSON.parse(call.arguments), { selector: "#go" });
-    assert.match(client.sessions[0].lastPrompt, /<tools>/);
+    assert.match(client.sessions[0].config.systemMessage.content, /<tools>/);
   });
 
   it("ignores tool_call JSON naming an undeclared tool", async () => {

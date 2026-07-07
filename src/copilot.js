@@ -4,15 +4,25 @@
 import { ApiError } from "./errors.js";
 
 /**
- * Create a chat-only session: no agent tools, and any permission request is
- * rejected, so the SDK behaves as a pure model endpoint.
+ * The SDK's default system message describes the host process's environment
+ * (cwd, directory listing, git root), which makes the model answer about the
+ * proxy's own directory instead of the caller's context — so it is always
+ * replaced.
  */
-export function createChatSession(client, { model, stream }) {
+const DEFAULT_SYSTEM = "You are a helpful assistant.";
+
+/**
+ * Create a chat-only session: no agent tools, any permission request is
+ * rejected, and the caller's system message replaces the SDK's, so the SDK
+ * behaves as a pure model endpoint.
+ */
+export function createChatSession(client, { model, stream, system }) {
   return client.createSession({
     model,
     streaming: stream,
     availableTools: [],
     onPermissionRequest: () => ({ kind: "reject" }),
+    systemMessage: { mode: "replace", content: system || DEFAULT_SYSTEM },
   });
 }
 
