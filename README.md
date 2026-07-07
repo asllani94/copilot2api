@@ -49,7 +49,7 @@ Or plain `curl`:
 ```sh
 curl http://127.0.0.1:4141/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{"model":"auto","messages":[{"role":"user","content":"Hello"}]}'
+  -d '{"model":"auto","messages":[{"role":"user","content":"Hello, how many r letters are there in strawberry word"}]}'
 ```
 
 ## Endpoints
