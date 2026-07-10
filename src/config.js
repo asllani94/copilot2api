@@ -11,6 +11,8 @@ import os from "node:os";
 import path from "node:path";
 
 export const DEFAULTS = Object.freeze({
+  /** Backend: "copilot" (GitHub Copilot, default) or "m365" (Microsoft 365 Copilot). */
+  mode: "copilot",
   /** Loopback by default: this server fronts a personal Copilot login. */
   host: "127.0.0.1",
   port: 4141,
@@ -39,6 +41,7 @@ export function resolveConfig(flags = {}) {
   const env = process.env;
 
   return Object.freeze({
+    mode: parseMode(flags.mode ?? env.COPILOT2API_MODE ?? file.mode ?? DEFAULTS.mode),
     host: flags.host ?? env.COPILOT2API_HOST ?? file.host ?? DEFAULTS.host,
     port: parsePort(flags.port ?? env.COPILOT2API_PORT ?? file.port ?? DEFAULTS.port),
     apiKey: flags["api-key"] ?? env.COPILOT2API_API_KEY ?? file.apiKey ?? DEFAULTS.apiKey,
@@ -46,7 +49,29 @@ export function resolveConfig(flags = {}) {
       env.COPILOT2API_MAX_BODY_BYTES ?? file.maxBodyBytes ?? DEFAULTS.maxBodyBytes,
     ),
     modelMap: parseModelMap(file.modelMap ?? DEFAULTS.modelMap),
+    m365: resolveM365(file.m365 ?? {}, env),
   });
+}
+
+/**
+ * Resolve Microsoft 365 Copilot settings. The access token is deliberately
+ * accepted only via environment variable or config file — never a CLI flag —
+ * so it does not leak into shell history or the process list. `tenantId` and
+ * `userOid` are optional; when omitted they are read from the token's claims.
+ */
+function resolveM365(file, env) {
+  return Object.freeze({
+    token: env.COPILOT2API_M365_TOKEN ?? env.M365_COPILOT_TOKEN ?? file.token,
+    tenantId: env.COPILOT2API_M365_TENANT_ID ?? env.M365_TENANT_ID ?? file.tenantId,
+    userOid: env.COPILOT2API_M365_USER_OID ?? env.M365_USER_OID ?? file.userOid,
+  });
+}
+
+function parseMode(value) {
+  if (value !== "copilot" && value !== "m365") {
+    throw new Error(`Invalid mode: ${value} (expected "copilot" or "m365")`);
+  }
+  return value;
 }
 
 /**

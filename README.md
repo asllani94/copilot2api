@@ -1,20 +1,31 @@
 # copilot2api
 
-**OpenAI- and Anthropic-compatible local API server for GitHub Copilot.**
+**OpenAI- and Anthropic-compatible local API server for GitHub Copilot and Microsoft 365 Copilot.**
 
-Point any tool that speaks the OpenAI or Anthropic API at your GitHub Copilot
-subscription. Built on the official
-[`@github/copilot-sdk`](https://github.com/github/copilot-sdk),
-which bundles the Copilot CLI — no separate install needed.
+Point any tool that speaks the OpenAI or Anthropic API at your Copilot
+subscription. Two backends are available behind one HTTP surface, selected with
+`--mode`:
+
+- **`copilot`** (default) — GitHub Copilot, via the official
+  [`@github/copilot-sdk`](https://github.com/github/copilot-sdk), which bundles
+  the Copilot CLI (no separate install needed).
+- **`m365`** — Microsoft 365 Copilot ("Bizchat"), via its SignalR-over-WebSocket
+  endpoint on `substrate.office.com`.
+
+Both modes expose the same endpoints (`/v1/chat/completions`, `/v1/messages`,
+`/v1/responses`, `/v1/models`) and are chosen through an adapter layer, so your
+client code does not change between them.
 
 ```
 Your app (OpenAI/Anthropic HTTP client)
         ↓  HTTP · http://127.0.0.1:4141/v1
-copilot2api (@github/copilot-sdk wrapper)
-        ↓  JSON-RPC
-Copilot CLI (server mode, bundled)
-        ↓
-GitHub Copilot
+copilot2api  ──────────────┬───────────────────────────┐
+   copilot adapter         │        m365 adapter        │
+        ↓ JSON-RPC         │        ↓ SignalR/WebSocket │
+   Copilot CLI (bundled)   │        ↓ (0x1E JSON frames)│
+        ↓                  │   wss://substrate.office.com
+   GitHub Copilot          │        ↓
+                           │   Microsoft 365 Copilot
 ```
 
 ## Install
@@ -57,6 +68,78 @@ curl http://127.0.0.1:4141/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model":"auto","messages":[{"role":"user","content":"Hello, how many r letters are there in strawberry word"}]}'
 ```
+
+## Microsoft 365 Copilot mode
+
+Run the same server against Microsoft 365 Copilot instead of GitHub Copilot by
+setting `--mode m365` and supplying a Microsoft-issued access token:
+
+```sh
+export COPILOT2API_M365_TOKEN="eyJ0eXAiOiJKV1Qi..."   # substrate access token
+copilot2api --mode m365
+```
+
+Then call it exactly like the default mode. M365 exposes conversation **tones**
+rather than raw models, surfaced as three model ids:
+
+| Model id    | Tone       |
+| ----------- | ---------- |
+| `auto`      | Magic (balanced) |
+| `quick`     | Chat (fast)      |
+| `reasoning` | Reasoning (deep) |
+
+```sh
+curl http://127.0.0.1:4141/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"reasoning","messages":[{"role":"user","content":"Summarize our Q3 strategy deck."}]}'
+```
+
+### Authentication & security
+
+The two modes authenticate very differently, on purpose. Read this before
+deploying M365 mode.
+
+**`copilot` mode** uses your local GitHub Copilot login (device flow). The token
+lives in the OS keychain and is managed by the bundled Copilot CLI/SDK — this
+proxy never reads, stores, or forwards it. Sign in once with `copilot2api login`.
+
+**`m365` mode** performs **no interactive login and runs no OAuth flow of its
+own**. You obtain a token through Microsoft's own sign-in and hand it to the
+proxy out-of-band via **config or environment only**:
+
+| Setting   | Env var(s)                                            | Config file (`m365.*`) | Required |
+| --------- | ----------------------------------------------------- | ---------------------- | -------- |
+| Token     | `COPILOT2API_M365_TOKEN`, `M365_COPILOT_TOKEN`        | `token`                | Yes      |
+| Tenant ID | `COPILOT2API_M365_TENANT_ID`, `M365_TENANT_ID`        | `tenantId`             | Auto\*   |
+| User OID  | `COPILOT2API_M365_USER_OID`, `M365_USER_OID`          | `userOid`              | Auto\*   |
+
+\* Tenant ID and user OID are read from the token's own `tid`/`oid` claims when
+you don't set them explicitly.
+
+Guarantees this mode holds to — enforced in code and covered by tests:
+
+- **The token is sent to exactly one destination:** `wss://substrate.office.com`,
+  the Microsoft endpoint that issued and consumes it (required to open the
+  authenticated WebSocket). It goes nowhere else.
+- **The token is never forwarded to the model.** Only your prompt text is placed
+  in the chat payload; the credential is never part of what the LLM sees.
+- **The token is never logged.** Connection URLs (which carry the token as the
+  query parameter substrate requires) are redacted before appearing in any log
+  or error message.
+- **The token is decoded only locally**, to read `oid`/`tid` and check expiry.
+  Its signature is never verified over the network — the proxy is the bearer,
+  not the audience.
+- **No CLI flag accepts the token**, so it can't leak into shell history or the
+  process list. Config file or environment variable only.
+
+Tokens are short-lived (typically ~1 hour). When one expires the proxy returns a
+clear `401` telling you to supply a fresh token; refreshing it is up to your own
+Microsoft sign-in process.
+
+> M365 Copilot's SignalR interface is a private, undocumented protocol. This
+> mode is a best-effort client for it and may break if Microsoft changes the
+> backend. Using it must comply with your organization's Microsoft 365 terms and
+> policies — confirm you're authorized before deploying it.
 
 ## Endpoints
 
@@ -107,13 +190,17 @@ asks for via `modelMap` (see Configuration):
 
 Precedence: **CLI flags > environment variables > config file > defaults.**
 
-| Setting  | Flag              | Env var                | Config file key | Default                            |
-| -------- | ----------------- | ---------------------- | --------------- | ---------------------------------- |
-| Port     | `-p, --port`      | `COPILOT2API_PORT`     | `port`          | `4141`                             |
-| Host     | `--host`          | `COPILOT2API_HOST`     | `host`          | `127.0.0.1`                        |
-| API key  | `--api-key`       | `COPILOT2API_API_KEY`  | `apiKey`        | _(none — no auth)_                 |
-| Model map | —                | —                      | `modelMap`      | `{}`                               |
-| Config   | `-c, --config`    | —                      | —               | `~/.config/copilot2api/config.json` |
+| Setting   | Flag              | Env var                                         | Config file key | Default                            |
+| --------- | ----------------- | ----------------------------------------------- | --------------- | ---------------------------------- |
+| Mode      | `--mode`          | `COPILOT2API_MODE`                              | `mode`          | `copilot`                          |
+| Port      | `-p, --port`      | `COPILOT2API_PORT`                              | `port`          | `4141`                             |
+| Host      | `--host`          | `COPILOT2API_HOST`                             | `host`          | `127.0.0.1`                        |
+| API key   | `--api-key`       | `COPILOT2API_API_KEY`                          | `apiKey`        | _(none — no auth)_                 |
+| Model map | —                 | —                                              | `modelMap`      | `{}`                               |
+| M365 token | — _(no flag)_    | `COPILOT2API_M365_TOKEN`, `M365_COPILOT_TOKEN` | `m365.token`    | _(none)_                           |
+| M365 tenant | — _(no flag)_   | `COPILOT2API_M365_TENANT_ID`, `M365_TENANT_ID` | `m365.tenantId` | _(from token `tid`)_               |
+| M365 user OID | — _(no flag)_ | `COPILOT2API_M365_USER_OID`, `M365_USER_OID`   | `m365.userOid`  | _(from token `oid`)_               |
+| Config    | `-c, --config`    | —                                              | —               | `~/.config/copilot2api/config.json` |
 
 Example config file (`~/.config/copilot2api/config.json`):
 
@@ -124,6 +211,19 @@ Example config file (`~/.config/copilot2api/config.json`):
   "modelMap": { "claude-sonnet-4": "auto" }
 }
 ```
+
+Example config file for M365 mode:
+
+```json
+{
+  "mode": "m365",
+  "apiKey": "my-local-secret",
+  "m365": { "token": "eyJ0eXAiOiJKV1Qi..." }
+}
+```
+
+The `apiKey` above is the *inbound* key your own clients must present to this
+proxy; it is unrelated to the M365 token and is never forwarded upstream.
 
 When an API key is set, API routes require it as `Authorization: Bearer <key>`
 (OpenAI style) or `x-api-key: <key>` (Anthropic style).
@@ -136,22 +236,25 @@ insists on specific model names but your plan only exposes `auto`.
 ## Notes & limitations
 
 - **Local by design.** Binds to `127.0.0.1` by default; the server fronts your
-  personal Copilot login, so treat it like a credential.
-- **Chat-only bridge.** Copilot's agent tools are disabled, permission
-  requests are rejected, and the SDK's default system message (which
-  describes the proxy host's own directory) is replaced with yours — it
-  behaves as a pure model endpoint.
-- Each request runs in a fresh SDK session; the message history is rendered
-  into a single transcript prompt.
-- Available models are governed by your Copilot plan/org policy (you may only
-  see `auto`).
-- `usage` token counts are not reported by the SDK and are returned as zeros;
-  `/v1/messages/count_tokens` returns a size-based estimate.
-- Anthropic request fields with no SDK equivalent (`max_tokens`,
+  Copilot credentials, so treat it like a credential itself.
+- **Chat-only bridge.** In `copilot` mode, Copilot's agent tools are disabled,
+  permission requests are rejected, and the SDK's default system message (which
+  describes the proxy host's own directory) is replaced with yours — it behaves
+  as a pure model endpoint.
+- Each request runs in a fresh session; the message history is rendered into a
+  single transcript prompt (both modes are stateless per request).
+- Available models depend on the backend: `copilot` mode lists what your Copilot
+  plan/org policy exposes (you may only see `auto`); `m365` mode exposes the
+  three tone-backed ids (`auto`/`quick`/`reasoning`).
+- `usage` token counts are not reported by either backend and are returned as
+  zeros; `/v1/messages/count_tokens` returns a size-based estimate.
+- Anthropic/OpenAI request fields with no backend equivalent (`max_tokens`,
   `temperature`, `metadata`, ...) are accepted and ignored.
-- Requires an active GitHub Copilot subscription. Use of Copilot through this
-  tool is subject to [GitHub's terms](https://docs.github.com/en/site-policy/github-terms/github-terms-for-additional-products-and-features#github-copilot)
-  and your organization's policies — check before deploying beyond personal use.
+- `copilot` mode requires an active GitHub Copilot subscription and is subject to
+  [GitHub's terms](https://docs.github.com/en/site-policy/github-terms/github-terms-for-additional-products-and-features#github-copilot).
+  `m365` mode requires a Microsoft 365 Copilot license and is subject to your
+  organization's Microsoft 365 terms. Check your org's policies before deploying
+  either beyond personal use.
 
 ## Troubleshooting
 

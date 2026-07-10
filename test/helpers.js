@@ -2,6 +2,7 @@
  * Test doubles for the Copilot SDK, so the app can be exercised without a
  * live Copilot login.
  */
+import { copilotAdapter } from "../src/adapters/copilot.js";
 
 /**
  * A scripted stand-in for a CopilotSession. The `script` callback receives
@@ -47,13 +48,17 @@ export class FakeSession {
 }
 
 /**
- * A stand-in for CopilotClient. `script` drives each created session;
- * created sessions are recorded on `.sessions` for assertions.
+ * A stand-in for CopilotClient, wrapped in the real `copilotAdapter` so tests
+ * exercise the adapter's session-config translation. `script` drives each
+ * created session; created sessions are recorded on `.sessions` for assertions.
+ *
+ * The returned value is an adapter (with `listModels`/`createChatSession`),
+ * with `.sessions` exposed for convenience — so `createApp(fakeClient(), ...)`
+ * works unchanged.
  */
 export function fakeClient({ models = [{ id: "auto", name: "Auto" }], script = () => {} } = {}) {
   const sessions = [];
-  return {
-    sessions,
+  const client = {
     async listModels() {
       return models;
     },
@@ -63,6 +68,9 @@ export function fakeClient({ models = [{ id: "auto", name: "Auto" }], script = (
       return session;
     },
   };
+  const adapter = copilotAdapter(client);
+  adapter.sessions = sessions;
+  return adapter;
 }
 
 /** A completed model turn that replies with `reply`. */

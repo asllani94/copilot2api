@@ -13,7 +13,7 @@ import {
   toAnthropicError,
   toMessagesResponse,
 } from "./anthropic.js";
-import { createChatSession, disconnectQuietly, runToCompletion } from "./copilot.js";
+import { disconnectQuietly, runToCompletion } from "./session.js";
 import { ApiError } from "./errors.js";
 import {
   completionMeta,
@@ -28,10 +28,10 @@ import { parseResponsesRequest, toResponse } from "./responses.js";
 import { parseToolCalls, ToolCallParser } from "./toolcalls.js";
 
 /**
- * @param {import("@github/copilot-sdk").CopilotClient} client
+ * @param {import("./adapters/index.js").createAdapter extends (...a: any) => Promise<infer R> ? R : never} adapter
  * @param {import("./config.js").resolveConfig extends (...a: any) => infer R ? R : never} config
  */
-export function createApp(client, config) {
+export function createApp(adapter, config) {
   const app = new Hono();
   const modelMap = config.modelMap ?? {};
   /** Translate a configured display/alias ID to its Copilot model ID. */
@@ -72,12 +72,12 @@ export function createApp(client, config) {
   app.get("/health", (c) => c.json({ status: "ok" }));
 
   app.on("GET", ["/v1/models", "/models"], async (c) =>
-    c.json(toModelList(await client.listModels())),
+    c.json(toModelList(await adapter.listModels())),
   );
 
   app.on("POST", ["/v1/chat/completions", "/chat/completions"], async (c) => {
     const request = parseChatRequest(await parseJson(c));
-    const session = await createChatSession(client, {
+    const session = await adapter.createChatSession({
       model: resolveModel(request.model),
       stream: request.stream,
       system: request.system,
@@ -92,7 +92,7 @@ export function createApp(client, config) {
 
   app.post("/v1/responses", async (c) => {
     const request = parseResponsesRequest(await parseJson(c));
-    const session = await createChatSession(client, {
+    const session = await adapter.createChatSession({
       model: resolveModel(request.model),
       stream: false,
       system: request.system,
@@ -103,7 +103,7 @@ export function createApp(client, config) {
 
   app.post("/v1/messages", async (c) => {
     const request = parseMessagesRequest(await parseJson(c));
-    const session = await createChatSession(client, {
+    const session = await adapter.createChatSession({
       model: resolveModel(request.model),
       stream: request.stream,
       system: request.system,

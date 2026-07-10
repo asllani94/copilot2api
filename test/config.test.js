@@ -10,6 +10,13 @@ const ENV_KEYS = [
   "COPILOT2API_PORT",
   "COPILOT2API_API_KEY",
   "COPILOT2API_MAX_BODY_BYTES",
+  "COPILOT2API_MODE",
+  "COPILOT2API_M365_TOKEN",
+  "M365_COPILOT_TOKEN",
+  "COPILOT2API_M365_TENANT_ID",
+  "M365_TENANT_ID",
+  "COPILOT2API_M365_USER_OID",
+  "M365_USER_OID",
   "XDG_CONFIG_HOME",
 ];
 
@@ -86,5 +93,42 @@ describe("resolveConfig", () => {
     const file = path.join(tmpDir, "bad.json");
     fs.writeFileSync(file, "{nope");
     assert.throws(() => resolveConfig({ config: file }), /Failed to parse/);
+  });
+
+  it("defaults to copilot mode", () => {
+    assert.equal(resolveConfig().mode, "copilot");
+  });
+
+  it("reads mode from flags, env, and file with correct precedence", () => {
+    const file = writeConfigFile({ mode: "m365" });
+    assert.equal(resolveConfig({ config: file }).mode, "m365");
+    process.env.COPILOT2API_MODE = "copilot";
+    assert.equal(resolveConfig({ config: file }).mode, "copilot");
+    assert.equal(resolveConfig({ config: file, mode: "m365" }).mode, "m365");
+  });
+
+  it("rejects an unknown mode", () => {
+    assert.throws(() => resolveConfig({ mode: "banana" }), /Invalid mode/);
+  });
+
+  it("resolves the m365 token from env, preferring the namespaced name", () => {
+    process.env.M365_COPILOT_TOKEN = "fallback";
+    assert.equal(resolveConfig().m365.token, "fallback");
+    process.env.COPILOT2API_M365_TOKEN = "primary";
+    assert.equal(resolveConfig().m365.token, "primary");
+  });
+
+  it("resolves m365 tenant/oid from env or config file", () => {
+    const file = writeConfigFile({ m365: { tenantId: "tid-file", userOid: "oid-file", token: "t" } });
+    const config = resolveConfig({ config: file });
+    assert.equal(config.m365.tenantId, "tid-file");
+    assert.equal(config.m365.userOid, "oid-file");
+    assert.equal(config.m365.token, "t");
+    process.env.M365_TENANT_ID = "tid-env";
+    assert.equal(resolveConfig({ config: file }).m365.tenantId, "tid-env");
+  });
+
+  it("leaves the m365 token undefined when nothing is configured", () => {
+    assert.equal(resolveConfig().m365.token, undefined);
   });
 });

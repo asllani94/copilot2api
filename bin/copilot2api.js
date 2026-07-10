@@ -5,14 +5,14 @@
 import { createRequire } from "node:module";
 import { parseArgs } from "node:util";
 import { serve } from "@hono/node-server";
-import { CopilotClient } from "@github/copilot-sdk";
+import { createAdapter } from "../src/adapters/index.js";
 import { createApp } from "../src/app.js";
 import { defaultConfigPath, DEFAULTS, resolveConfig } from "../src/config.js";
 
 const pkg = createRequire(import.meta.url)("../package.json");
 
 const HELP = `copilot2api ${pkg.version}
-OpenAI-compatible local API server for GitHub Copilot.
+OpenAI- and Anthropic-compatible local API server for GitHub Copilot or Microsoft 365 Copilot.
 
 Usage:
   copilot2api [options]
@@ -20,18 +20,24 @@ Usage:
 Options:
   -p, --port <port>     Port to listen on (default: ${DEFAULTS.port})
       --host <host>     Interface to bind (default: ${DEFAULTS.host})
+      --mode <mode>     Backend: "copilot" (default) or "m365"
       --api-key <key>   Require the key ("Authorization: Bearer" or "x-api-key") on API routes
   -c, --config <path>   Config file (default: ${defaultConfigPath()})
   -h, --help            Show this help
   -v, --version         Show version
 
 Configuration precedence: CLI flags > environment > config file > defaults.
-Environment variables: COPILOT2API_PORT, COPILOT2API_HOST, COPILOT2API_API_KEY.
-Config file format: JSON with { "port", "host", "apiKey", "modelMap" }.
+Environment variables: COPILOT2API_MODE, COPILOT2API_PORT, COPILOT2API_HOST, COPILOT2API_API_KEY.
+Config file format: JSON with { "mode", "port", "host", "apiKey", "modelMap", "m365" }.
 
 Authentication:
-  Uses your GitHub Copilot login (device flow). To sign in, run:
-    copilot2api login
+  copilot mode (default):
+    Uses your GitHub Copilot login (device flow). To sign in, run:
+      copilot2api login
+  m365 mode:
+    Supply a Microsoft 365 substrate access token — never a login flow here.
+    Set COPILOT2API_M365_TOKEN (or "m365": { "token": ... } in the config file).
+    The token is sent only to substrate.office.com and never to the model.
 `;
 
 main().catch((err) => {
@@ -45,6 +51,7 @@ async function main() {
     options: {
       port: { type: "string", short: "p" },
       host: { type: "string" },
+      mode: { type: "string" },
       "api-key": { type: "string" },
       config: { type: "string", short: "c" },
       help: { type: "boolean", short: "h" },
@@ -55,6 +62,8 @@ async function main() {
   if (values.help) return void console.log(HELP);
   if (values.version) return void console.log(pkg.version);
   if (positionals[0] === "login" || positionals[0] === "logout") {
+    // Auth commands only apply to the GitHub Copilot device flow. M365 mode
+    // has no login here — it takes a pre-issued token via env/config.
     return runCopilotCli(positionals);
   }
   if (positionals.length > 0) {
@@ -66,13 +75,17 @@ async function main() {
 }
 
 async function startServer(config) {
-  const client = new CopilotClient();
-  await client.start();
+  const adapter = await createAdapter(config);
 
   const server = serve(
-    { fetch: createApp(client, config).fetch, port: config.port, hostname: config.host },
+    { fetch: createApp(adapter, config).fetch, port: config.port, hostname: config.host },
     (info) => {
-      console.log(`copilot2api ${pkg.version} listening on http://${info.address}:${info.port}/v1`);
+      console.log(
+        `copilot2api ${pkg.version} (${config.mode} mode) listening on http://${info.address}:${info.port}/v1`,
+      );
+      if (config.mode === "m365") {
+        console.log("M365 mode: access token read from config/env; sent only to substrate.office.com.");
+      }
       if (!config.apiKey) console.log("No API key configured; accepting unauthenticated requests.");
       // Only guard against stray async errors once startup has succeeded —
       // startup failures (e.g. EADDRINUSE) must stay fatal.
@@ -89,7 +102,7 @@ async function startServer(config) {
     console.log("\nShutting down...");
     server.close();
     try {
-      await client.stop();
+      await adapter.stop();
     } finally {
       process.exit(0);
     }
