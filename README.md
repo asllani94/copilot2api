@@ -71,6 +71,12 @@ curl http://127.0.0.1:4141/v1/chat/completions \
 
 ## Microsoft 365 Copilot mode
 
+> **Credits.** The M365 Copilot wire protocol (the SignalR-over-WebSocket
+> handshake, connection URL, and chat payload) is a JavaScript port of
+> [**HEXUXIU/M365-Copilot2API**](https://github.com/HEXUXIU/M365-Copilot2API).
+> All credit for reverse-engineering that protocol goes to that project; this
+> mode reimplements it to stay 1:1 with those requests. Thank you.
+
 Run the same server against Microsoft 365 Copilot instead of GitHub Copilot by
 setting `--mode m365` and supplying a Microsoft-issued access token:
 
@@ -116,6 +122,54 @@ proxy out-of-band via **config or environment only**:
 \* Tenant ID and user OID are read from the token's own `tid`/`oid` claims when
 you don't set them explicitly.
 
+#### Getting an M365 access token
+
+The token you need is the **substrate ("Sydney") access token** — the same one
+your browser uses to talk to Copilot. The most reliable way to get it is to copy
+it out of a live Copilot session in your browser. This works the same for a
+Netherlands / EU tenant as anywhere else (see the region note below).
+
+1. In a browser, sign in to **<https://m365.cloud.microsoft/>** with your work
+   account and open **Copilot** (the chat).
+2. Open DevTools (**F12**) → **Network** tab, and set the filter to **WS**
+   (WebSocket).
+3. Send Copilot any message to make it open its connection.
+4. Click the WebSocket request to **`substrate.office.com`** (its name contains
+   `ChatHub`). In **Headers**, find the **Request URL** and copy the value of the
+   **`access_token`** query parameter — a long string starting with `eyJ…`.
+   That is your token.
+5. Hand it to the proxy (environment variable, never a flag):
+
+   ```sh
+   export COPILOT2API_M365_TOKEN="eyJ0eXAiOiJKV1Qi..."
+   copilot2api --mode m365
+   ```
+
+If DevTools hides the query string, use the browser **Console** instead — right
+after logging in, the token is in the MSAL cache in local storage:
+
+```js
+// Run in the console on m365.cloud.microsoft; prints the substrate token.
+Object.entries(localStorage)
+  .filter(([k]) => k.includes("substrate.office.com/sydney"))
+  .map(([, v]) => JSON.parse(v).secret)
+  .filter(Boolean)[0];
+```
+
+You don't need to look up your tenant ID or user OID separately — the proxy
+reads them from the token's `tid` and `oid` claims automatically.
+
+> **Netherlands / EU accounts.** The steps are identical: sign-in and token
+> capture happen on the global `m365.cloud.microsoft` portal, and the token is
+> presented to `substrate.office.com`, which routes to the datacenter your
+> tenant lives in (EU tenants stay within the Microsoft EU Data Boundary). The
+> token embeds your tenant, and the proxy auto-detects your local time zone and
+> locale (e.g. `Europe/Amsterdam`, `nl-NL`) for each request — nothing
+> region-specific to configure.
+
+The token is a bearer credential — treat it like a password. It typically
+expires in about an hour; when it does, repeat the steps above for a fresh one.
+
 Guarantees this mode holds to — enforced in code and covered by tests:
 
 - **The token is sent to exactly one destination:** `wss://substrate.office.com`,
@@ -136,10 +190,22 @@ Tokens are short-lived (typically ~1 hour). When one expires the proxy returns a
 clear `401` telling you to supply a fresh token; refreshing it is up to your own
 Microsoft sign-in process.
 
-> M365 Copilot's SignalR interface is a private, undocumented protocol. This
-> mode is a best-effort client for it and may break if Microsoft changes the
-> backend. Using it must comply with your organization's Microsoft 365 terms and
-> policies — confirm you're authorized before deploying it.
+#### Disclaimer
+
+> M365 mode talks to a **private, undocumented** Microsoft interface that was
+> reverse-engineered by [HEXUXIU/M365-Copilot2API](https://github.com/HEXUXIU/M365-Copilot2API);
+> this is a best-effort reimplementation and may break at any time if Microsoft
+> changes the backend.
+>
+> This project is **not affiliated with, endorsed by, or supported by Microsoft
+> or GitHub.** "Microsoft 365", "Copilot", and related marks belong to their
+> respective owners. M365 mode is provided **as-is, without warranty of any
+> kind**, and you use it **at your own risk** — including any risk to your
+> account. Automating or accessing Microsoft 365 Copilot outside the official
+> clients may violate your Microsoft 365 or organizational terms of service;
+> **you are responsible for ensuring you are authorized to use it**, and for
+> complying with your organization's policies and applicable law. If in doubt,
+> don't.
 
 ## Endpoints
 
